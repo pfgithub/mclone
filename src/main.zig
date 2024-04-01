@@ -1,11 +1,14 @@
 const std = @import("std");
 const core = @import("mach").core;
 const gpu = core.gpu;
+const mclone = @import("mclone.zig");
 
 pub const App = @This();
 
 title_timer: core.Timer,
 pipeline: *gpu.RenderPipeline,
+
+mc: mclone.DisplayCache,
 
 pub fn init(app: *App) !void {
     core.setFrameRateLimit(60);
@@ -35,12 +38,38 @@ pub fn init(app: *App) !void {
     };
     const pipeline = core.device.createRenderPipeline(&pipeline_descriptor);
 
-    app.* = .{ .title_timer = try core.Timer.start(), .pipeline = pipeline };
+    app.* = .{
+        .title_timer = try core.Timer.start(),
+        .pipeline = pipeline,
+        .mc = mclone.DisplayCache.init(core.allocator),
+    };
+    errdefer app.mc.deinit();
+
+    var timer = try std.time.Timer.start();
+    std.log.info("generating world…", .{});
+    const xw = 4;
+    const yw = 4;
+    const zw = 4;
+    for (0..xw) |xun| {
+        const x = @as(i32, @intCast(xun)) - (xw / 2);
+        for (0..yw) |yun| {
+            const y = @as(i32, @intCast(yun)) - (yw / 2);
+            for (0..zw) |zun| {
+                const z = @as(i32, @intCast(zun)) - (zw / 2);
+
+                try app.mc.world.add(.{ x, y, z }, try mclone.generateChunk(.{ x, y, z }, app.mc.alloc));
+            }
+        }
+    }
+    _ = app.mc.world.setBlock(.{ 0, 0, 0 }, .stone);
+    std.log.info("generated in {d}ns", .{timer.lap()});
+    try app.mc.update();
+    std.log.info("generated meshes in {d}ns", .{timer.lap()});
 }
 
 pub fn deinit(app: *App) void {
     defer core.deinit();
-    _ = app;
+    app.mc.deinit();
 }
 
 pub fn update(app: *App) !bool {

@@ -25,15 +25,16 @@ pub const Block = enum(u16) {
 pub const ChunkSizeX = 12;
 pub const ChunkSizeY = 24;
 pub const ChunkSizeZ = 16;
-pub const ChunkSize = BlockPos{ ChunkSizeX, ChunkSizeY, ChunkSizeZ }; // ideally std.meta.Vector(3, comptime_int)
+pub const ChunkSize = BlockPos{ ChunkSizeX, ChunkSizeY, ChunkSizeZ }; // ideally @Vector(3, comptime_int)
 pub const BLOCKS_PER_CHUNK = @reduce(.Mul, ChunkSize);
 
-pub const InChunkBlockPos = std.meta.Vector(3, i32);
+pub const InChunkBlockPos = @Vector(3, i32);
 
-pub const BlockPos = std.meta.Vector(3, i32);
-pub const WorldPos = std.meta.Vector(3, f32);
+pub const BlockPos = @Vector(3, i32);
+pub const WorldPos = @Vector(3, f32);
 
-pub const BlockSize = @splat(3, BlockSize1);
+// why is this configurable? force it to 1.0
+pub const BlockSize: WorldPos = @splat(BlockSize1);
 pub const BlockSize1: f32 = 1.5;
 
 // ERROR; threadlocals were crashing. TODO
@@ -174,7 +175,6 @@ pub const Chunk = struct {
 
     pub fn indexFromPosChunkRelative(pos: BlockPos) BlockIndex {
         return @intCast(
-            BlockIndex,
             pos[x] * ChunkSizeY * ChunkSizeZ +
                 pos[y] * ChunkSizeZ +
                 pos[z],
@@ -203,9 +203,9 @@ pub const Chunk = struct {
     }
 };
 pub fn toWorldPos(pos: BlockPos) WorldPos {
-    const xf = @intToFloat(f32, pos[x]);
-    const yf = @intToFloat(f32, pos[y]);
-    const zf = @intToFloat(f32, pos[z]);
+    const xf: f32 = @floatFromInt(pos[x]);
+    const yf: f32 = @floatFromInt(pos[y]);
+    const zf: f32 = @floatFromInt(pos[z]);
 
     return WorldPos{ xf, yf, zf } * BlockSize;
 }
@@ -215,7 +215,7 @@ pub fn toWorldPos(pos: BlockPos) WorldPos {
 //
 // this must be done any time a chunk changes
 
-const Quad = struct { points: [4]WorldPos, color: std.meta.Vector(3, u8) };
+const Quad = struct { points: [4]WorldPos, color: @Vector(3, u8) };
 pub const ChunkMesh = struct {
     chunk_hashes: [7]usize,
     quads: []Quad,
@@ -272,14 +272,14 @@ const FaceDirection = struct {
 pub fn generateMesh(world: World, chunk_offset_unscaled: BlockPos, chunk: Chunk, alloc: std.mem.Allocator) !ChunkMesh {
     var res = std.ArrayList(Quad).init(alloc);
 
-    for (chunk.blocks) |block, i| {
+    for (chunk.blocks, 0..) |block, i| {
         const color = switch (block) {
             .air => continue,
-            .stone => std.meta.Vector(3, u8){ 235, 64, 52 },
-            .grass => std.meta.Vector(3, u8){ 52, 235, 64 },
+            .stone => @Vector(3, u8){ 235, 64, 52 },
+            .grass => @Vector(3, u8){ 52, 235, 64 },
         };
 
-        const pos_relative = Chunk.posFromIndexChunkRelative(@intCast(Chunk.BlockIndex, i));
+        const pos_relative = Chunk.posFromIndexChunkRelative(@intCast(i));
         const pos = pos_relative + scaleOffset(chunk_offset_unscaled);
         const pos0 = toWorldPos(pos_relative);
         const pos1 = pos0 + BlockSize;
@@ -347,7 +347,7 @@ pub fn generateMesh(world: World, chunk_offset_unscaled: BlockPos, chunk: Chunk,
     }
 
     return ChunkMesh{
-        .quads = res.toOwnedSlice(),
+        .quads = try res.toOwnedSlice(),
         .chunk_hashes = getChunkHashes(world, chunk_offset_unscaled),
     };
 }
@@ -379,10 +379,10 @@ pub fn generateChunk(offset_unscaled: BlockPos, alloc: std.mem.Allocator) !Chunk
         .blocks = blocks,
     };
 
-    for (range(ChunkSizeX)) |_, xp| {
-        for (range(ChunkSizeY)) |_, yp| {
-            for (range(ChunkSizeZ)) |_, zp| {
-                const pos_relative = BlockPos{ @intCast(i32, xp), @intCast(i32, yp), @intCast(i32, zp) };
+    for (0..ChunkSizeX) |xp| {
+        for (0..ChunkSizeY) |yp| {
+            for (0..ChunkSizeZ) |zp| {
+                const pos_relative = BlockPos{ @as(i32, @intCast(xp)), @as(i32, @intCast(yp)), @as(i32, @intCast(zp)) };
                 const pos = pos_relative + scaleOffset(offset_unscaled);
 
                 const block: Block = switch (pos[y]) {
@@ -406,7 +406,7 @@ pub fn range(max: usize) []const void {
 pub fn normalize(dir: WorldPos) WorldPos {
     const len = std.math.sqrt(@reduce(.Add, dir * dir)); // sqrt(...dirv);
     if (len == 0) unreachable; // attempt to normalize directionless vector
-    return dir / @splat(3, len);
+    return dir / @as(WorldPos, @splat(len));
 }
 
 pub fn traceRay(
@@ -425,7 +425,7 @@ pub fn traceRay(
 
     const getVoxel = struct {
         fn getVoxel(data_: usize, pos: BlockPos) bool {
-            const theworld = @intToPtr(*const Data, data_).world;
+            const theworld = @as(*const World, @ptrFromInt(data_)).world;
 
             const block = theworld.blockAt(pos) orelse return false;
             return block.selectable();
@@ -433,7 +433,7 @@ pub fn traceRay(
     }.getVoxel;
 
     const res = traceRay_impl(
-        @ptrToInt(&data),
+        @intFromPtr(&data),
         getVoxel,
         p,
         d,
@@ -459,19 +459,19 @@ const RayHitRaw = struct {
     normal: BlockPos,
 };
 
-fn i32x3_to_f32x3(ints: std.meta.Vector(3, i32)) std.meta.Vector(3, f32) {
+fn i32x3_to_f32x3(ints: @Vector(3, i32)) @Vector(3, f32) {
     return .{
-        @intToFloat(f32, ints[x]),
-        @intToFloat(f32, ints[y]),
-        @intToFloat(f32, ints[z]),
+        @floatFromInt(ints[x]),
+        @floatFromInt(ints[y]),
+        @floatFromInt(ints[z]),
     };
 }
 
-fn f32x3_to_i32x3(floats: std.meta.Vector(3, f32)) std.meta.Vector(3, i32) {
+fn f32x3_to_i32x3(floats: @Vector(3, f32)) @Vector(3, i32) {
     return .{
-        @floatToInt(i32, floats[x]),
-        @floatToInt(i32, floats[y]),
-        @floatToInt(i32, floats[z]),
+        @intFromFloat(floats[x]),
+        @intFromFloat(floats[y]),
+        @intFromFloat(floats[z]),
     };
 }
 
@@ -491,27 +491,27 @@ fn traceRay_impl(
     var t: f32 = 0.0;
     var i = f32x3_to_i32x3(@floor(p));
 
-    var step = @select(
+    const step = @select(
         i2,
-        d > @splat(3, @as(f32, 0)),
-        @splat(3, @as(i2, 1)),
-        @splat(3, @as(i2, -1)),
+        d > @as(WorldPos, @splat(0)),
+        @as(@Vector(3, i2), @splat(1)),
+        @as(@Vector(3, i2), @splat(-1)),
     );
 
-    var t_delta = @fabs(@splat(3, @as(f32, 1)) / d);
+    const t_delta: WorldPos = @abs(@as(WorldPos, @splat(1)) / d);
 
-    var dist = @select(
+    const dist = @select(
         f32,
-        step > @splat(3, @as(i2, 0)),
-        i32x3_to_f32x3(i + @splat(3, @as(i32, 1))) - p,
+        step > @as(@Vector(3, i2), @splat(0)),
+        i32x3_to_f32x3(i + @as(@Vector(3, i32), @splat(1))) - p,
         p - i32x3_to_f32x3(i),
     );
 
     var t_max = @select(
         f32,
-        t_delta < @splat(3, std.math.inf(f32)),
+        t_delta < @as(WorldPos, @splat(std.math.inf(f32))),
         t_delta * dist,
-        @splat(3, std.math.inf(f32)),
+        @as(WorldPos, @splat(std.math.inf(f32))),
     );
 
     var stepped_dir: enum(u2) { x = x, y = y, z = z, na } = .na;
@@ -520,7 +520,7 @@ fn traceRay_impl(
         if (stepped_dir != .na and getVoxel(data, i)) {
             return RayHitRaw{
                 .block = i,
-                .world_unscaled = p + @splat(3, t) * d,
+                .world_unscaled = p + @as(WorldPos, @splat(t)) * d,
                 .normal = switch (stepped_dir) {
                     .na => unreachable,
                     .x => .{ -step[x], 0, 0 },
@@ -549,7 +549,7 @@ fn traceRay_impl(
                 i[dir] += step[dir];
                 t = t_max[dir];
                 t_max[dir] += t_delta[dir];
-                stepped_dir = @intToEnum(@TypeOf(stepped_dir), dir);
+                stepped_dir = @enumFromInt(dir);
                 break;
             }
         }
