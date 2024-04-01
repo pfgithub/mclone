@@ -65,6 +65,27 @@ pub fn init(app: *App) !void {
     std.log.info("generated in {d}ns", .{timer.lap()});
     try app.mc.update();
     std.log.info("generated meshes in {d}ns", .{timer.lap()});
+
+    // notes:
+    // - apparently we can async upload stuff to the gpu?
+    // - so when new mesh data is available, we can send it off and then switch once it's fully sent
+    // - also we can use one big buffer and render within it i think? instead of one draw call per chunk
+    // not sure how that works
+    // is that possible? draw() accepts vertex_count, instance_count, first_vertex, first_instance
+    // but it takes multiple draw calls to draw from different places in the buffer, = one draw call
+    // per chunk
+
+    // > However, if each 3D model requires different vertex data (which is frequently the case),
+    // > you can still render them using a single draw call. To do this, you would add another stream
+    // > into your vertex data with glVertexAttribPointer (and glEnableVertexAttribArray). This extra
+    // > stream would contain the index of the matrix within the uniform buffer that vertex should
+    // > use when rendering - so each mesh within the VBO would have an identical index in the
+    // > extra stream. The uniform buffer contains the same data as in the instancing setup.
+
+    // is that helpful? it doesn't seem helpful
+
+    // we could put all the mesh data in one thing and have some discarded vertices
+    // is that fine to do?
 }
 
 pub fn deinit(app: *App) void {
